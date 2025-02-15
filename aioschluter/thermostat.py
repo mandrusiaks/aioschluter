@@ -1,6 +1,25 @@
+from enum import Enum
+
+class EnergyCalculationDuration(Enum):
+    DAY = "Day"
+    WEEK = "Week"
+    MONTH = "Month"
+
+class DayEnergyUsage:
+    def __init__(self, json):
+        usage_jsons = json["Usage"]
+        hour_usages = []
+        for index, usage_json in enumerate(usage_jsons):
+            hour_usages.append(HourEnergyUsage(usage_json, index))
+
+        self.hour_usages = hour_usages
+
+class HourEnergyUsage:
+    def __init__(self, json, time):
+        self.energy_in_kwh = json["EnergyKWattHour"]
+        self.time = time
+
 """ A single instance of a Schluter Thermostat """
-
-
 class Thermostat:
     """A Schluter Thermostat"""
 
@@ -37,6 +56,7 @@ class Thermostat:
         self._is_assigned = data["HasBeenAssigned"]
         self._distributer_id = data["DistributerId"]
         self._support = data["Support"]
+        self._day_energy_usages = [] # populated async
 
     def __repr__(self):
         """Print Method."""
@@ -116,3 +136,11 @@ class Thermostat:
     def sw_version(self):
         """Software Version of the Thermostat."""
         return self._sw_version
+    
+    @property
+    def day_energy_usages(self):
+        """Energy usage per day"""
+        return self._day_energy_usages
+    
+    def update_energy_usage(self, day_energy_usages):
+        self._day_energy_usages = day_energy_usages

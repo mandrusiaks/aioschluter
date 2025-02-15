@@ -1,7 +1,7 @@
 """Async Python wrapper to get data from schluter ditra heat thermostats."""
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Optional
 
 from aiohttp import ClientSession
@@ -11,13 +11,15 @@ from .const import (
     API_AUTH_URL,
     API_GET_THERMOSTATS_URL,
     API_SET_THERMOSTAT_URL,
+    API_GET_ENERGY_USAGE_URL,
     HTTP_OK,
     HTTP_UNAUTHORIZED,
 )
-from .thermostat import Thermostat
+from .thermostat import Thermostat, DayEnergyUsage
 
 _LOGGER = logging.getLogger(__name__)
 
+DAYS_OF_HISTORY = 29 # 29 + today, so 30 days total including today
 
 class SchluterApi:
     """Main class to perform Schluter API requests."""
@@ -56,12 +58,14 @@ class SchluterApi:
         """Timestamp the session was created on."""
         return self._sessionid_timestamp
 
-    @staticmethod
-    def _extract_thermostats_from_data(data: dict[str, Any]) -> dict[str, Any]:
+    async def _extract_thermostats_from_data(self, data: dict[str, Any]) -> dict[str, Any]:
         thermostats = {}
         for group in data["Groups"]:
             for tdata in group["Thermostats"]:
-                thermostats[tdata["SerialNumber"]] = Thermostat(tdata)
+                tstat = Thermostat(tdata)
+                updated_tstat = await self._async_get_energy_usage(tstat)
+                thermostats[tdata["SerialNumber"]] = updated_tstat
+
         return thermostats
 
     async def async_get_sessionid(self, username, password) -> Optional[str]:
@@ -181,6 +185,27 @@ class SchluterApi:
             )
             data = await resp.json()
         return data["Success"]
+    
+    async def _async_get_energy_usage(self, thermostat):
+        """test"""
+        today = date.today()
+        today_param = today.strftime("%d/%m/%Y")
+        params = {"sessionId": self._sessionid, "serialnumber": thermostat.serial_number, "view": "day", "date": today_param, "history": str(DAYS_OF_HISTORY), "calc": "false", "weekstart": "monday"}
+        async with self._session.get(API_GET_ENERGY_USAGE_URL, params=params) as resp:
+            if resp.status == HTTP_UNAUTHORIZED:
+                raise InvalidSessionIdError(
+                    "An invalid or expired sessionid was supplied"
+                )
+            if resp.status != HTTP_OK:
+                raise ApiError(f"Invalid Response from Schluter API: {resp.status}")
+
+            data = await resp.json()
+            energy_usage_jsons = data["EnergyUsage"]
+            day_energy_usages = []
+            for json in energy_usage_jsons:
+                day_energy_usages.append(DayEnergyUsage(json))
+                thermostat.update_energy_usage(day_energy_usages)
+        return thermostat
 
 
 class ApiError(Exception):
